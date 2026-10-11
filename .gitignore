@@ -1,0 +1,11 @@
+node_modules/
+.idea/
+dist/
+.env*
+!.env.example
+*.local
+*.tsbuildinfo
+.artifacts/
+.DS_Store
+supabase/.temp/
+supabase/.branches/

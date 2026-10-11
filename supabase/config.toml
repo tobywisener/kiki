@@ -1,0 +1,8 @@
+project_id = "kiki"
+
+# These endpoints validate a user JWT or webhook secret inside the handler.
+[functions.process-message]
+verify_jwt = false
+
+[functions.save-subscription]
+verify_jwt = false
