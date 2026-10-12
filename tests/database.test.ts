@@ -37,6 +37,33 @@ async function asUser(db: PGlite, id: string) {
   await db.exec('set role authenticated')
 }
 
+test('members can send images with optional captions; message records stay private and image-only messages skip translation', async () => {
+  const db = await database()
+  const imageUrl = 'https://i.ibb.co/abc/kiki-test.jpg'
+  try {
+    await asUser(db, one)
+    await db.query('insert into messages (id,sender_id,source_language,image_url) values ($1,$2,$3,$4)', [message, one, 'en', imageUrl])
+    const saved = (await db.query('select original,image_url,translation_status from messages where id=$1', [message])).rows[0]
+    assert.deepEqual(saved, { original: '', image_url: imageUrl, translation_status: 'ready' })
+    await asUser(db, two)
+    assert.equal((await db.query('select image_url from messages')).rows[0].image_url, imageUrl)
+    const captioned = crypto.randomUUID()
+    await db.query('insert into messages (id,sender_id,source_language,image_url,original) values ($1,$2,$3,$4,$5)', [captioned, two, 'th', imageUrl, 'สวัสดี'])
+    await asUser(db, outsider)
+    assert.equal((await db.query('select * from messages')).rows.length, 0)
+    await db.exec('reset role; set role service_role')
+    assert.equal((await db.query('select * from claim_translation($1)', [message])).rows.length, 0)
+    assert.equal((await db.query('select * from claim_translation($1)', [captioned])).rows[0].original, 'สวัสดี')
+    await asUser(db, one)
+    for (const url of ['https://attacker.test/photo.jpg', 'https://i.ibb.co/abc/photo.svg', 'http://i.ibb.co/abc/photo.jpg']) {
+      await assert.rejects(db.query('insert into messages (id,sender_id,source_language,image_url) values ($1,$2,$3,$4)', [crypto.randomUUID(), one, 'en', url]), { code: '23514' })
+    }
+    await assert.rejects(db.query('insert into messages (id,sender_id,source_language,image_url) values ($1,$2,$3,$4)', [crypto.randomUUID(), two, 'th', imageUrl]), { code: '42501' })
+    await assert.rejects(db.query('update messages set image_url=$1 where id=$2', [imageUrl, message]), { code: '42501' })
+    await assert.rejects(db.query('insert into messages (id,sender_id,source_language,image_url,original) values ($1,$2,$3,$4,$5)', [crypto.randomUUID(), one, 'en', imageUrl, 'x'.repeat(2001)]), { code: '23514' })
+  } finally { await db.close() }
+})
+
 test('private chat: members can send/read; outsiders and anonymous users cannot', async () => {
   const db = await database()
   try {

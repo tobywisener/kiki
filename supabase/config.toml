@@ -6,3 +6,6 @@ verify_jwt = false
 
 [functions.save-subscription]
 verify_jwt = false
+
+[functions.upload-image]
+verify_jwt = false

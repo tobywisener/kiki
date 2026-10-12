@@ -4,6 +4,7 @@ export type Message = {
   id: string
   sender_id: string
   original: string
+  image_url?: string | null
   source_language: Language
   translation: string | null
   thai_romanization?: string | null

@@ -7,10 +7,13 @@ import AlignedMessage from './AlignedMessage'
 import Dictation from './DictationControl'
 import { appendDictation } from './dictation'
 import { resizeMessageInput } from './composer'
+import ImageMessage from './ImageMessage'
+import { validateSelectedImage } from './images'
+import { imageAccept, isMessageImageUrl } from '../supabase/functions/_shared/images'
 import { isStandalone, installInstructions } from './pwa'
 import { canMarkRead, receiptStatus } from './messages'
 
-function Icon({ name, size = 20 }: { name: 'heart' | 'send' | 'bell' | 'settings' | 'close' | 'globe' | 'arrow'; size?: number }) {
+function Icon({ name, size = 20 }: { name: 'heart' | 'send' | 'bell' | 'settings' | 'close' | 'globe' | 'arrow' | 'image'; size?: number }) {
   const paths = {
     heart: <path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1.1-1.1a5.5 5.5 0 0 0-7.8 7.8L12 21l8.8-8.6a5.5 5.5 0 0 0 0-7.8Z" />,
     send: <><path d="m22 2-7 20-4-9-9-4Z" /><path d="M22 2 11 13" /></>,
@@ -19,13 +22,14 @@ function Icon({ name, size = 20 }: { name: 'heart' | 'send' | 'bell' | 'settings
     close: <><path d="m6 6 12 12M6 18 18 6" /></>,
     globe: <><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3c5 5 5 13 0 18-5-5-5-13 0-18" /></>,
     arrow: <path d="m9 5 7 7-7 7" />,
+    image: <><rect x="3" y="3" width="18" height="18" rx="3" /><circle cx="8" cy="8" r="1.5" /><path d="m3 16 5-5 5 5 3-3 5 5" /></>,
   }
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>
 }
 
 const copy = {
-  en: { tagline: 'A little place for the two of us.', chat: 'Our conversation', subtitle: 'Different languages. Same feeling.', settings: 'Our little space', notifications: 'Enable notifications', placeholder: 'Type a message', send: 'Send message', original: 'Original', translated: 'Translation', translating: 'Translating…', failed: 'Translation unavailable', retry: 'Try translation again', offline: 'You’re offline. Unsent messages can be retried when you reconnect.', pending: 'Sending…', unsent: 'Not sent · tap to retry', empty: 'Your story starts here.', emptySub: 'Send your first message. We’ll take care of the translation.', older: 'Earlier messages', signout: 'Sign out', yourLanguage: 'Your language', notificationNote: 'A gentle nudge when your person sends a message. Message text stays off the lock screen.', install: 'Make yourself at home', installNote: 'iPhone: open in Safari → Share → Add to Home Screen. Android: open in Chrome → menu → Install app. Then open Kiki from its icon to enable notifications.', privacy: 'Only the two of you can access this chat. Messages are processed by our backend and Azure Translator; they are not end-to-end encrypted. Dictation uses your browser’s speech service, which may send audio to its provider. Kiki does not save voice clips.', preview: 'Preview conversation · these are sample messages', previewSend: 'This is a preview. Sign in to send a real message.', signin: 'Sign in to your space', email: 'Email', password: 'Password', login: 'Come on in', back: 'Back to sign in', viewPreview: 'Take a little look around', setup: 'Connect your Supabase project to start your private chat. See the setup guide in README.md.', enabled: 'Notifications enabled', refresh: 'Reconnect', loading: 'Opening your space…' },
-  th: { tagline: 'พื้นที่เล็ก ๆ ของเราสองคน', chat: 'บทสนทนาของเรา', subtitle: 'ต่างภาษา แต่ความรู้สึกเดียวกัน', settings: 'พื้นที่ของเรา', notifications: 'เปิดการแจ้งเตือน', placeholder: 'พิมพ์ข้อความ', send: 'ส่งข้อความ', original: 'ข้อความต้นฉบับ', translated: 'คำแปล', translating: 'กำลังแปล…', failed: 'แปลข้อความไม่ได้', retry: 'ลองแปลอีกครั้ง', offline: 'คุณออฟไลน์อยู่ ลองส่งข้อความอีกครั้งเมื่อเชื่อมต่อแล้ว', pending: 'กำลังส่ง…', unsent: 'ยังไม่ส่ง · แตะเพื่อลองอีกครั้ง', empty: 'เรื่องราวของเราเริ่มที่นี่', emptySub: 'ส่งข้อความแรก แล้วเราจะแปลให้', older: 'ข้อความก่อนหน้า', signout: 'ออกจากระบบ', yourLanguage: 'ภาษาของคุณ', notificationNote: 'แจ้งเตือนเมื่อคนพิเศษส่งข้อความ โดยไม่แสดงข้อความบนหน้าจอล็อก', install: 'เพิ่มไว้บนหน้าจอหลัก', installNote: 'iPhone: เปิดใน Safari → แชร์ → เพิ่มไปยังหน้าจอโฮม Android: เปิดใน Chrome → เมนู → ติดตั้งแอป แล้วเปิด Kiki จากไอคอนเพื่อเปิดการแจ้งเตือน', privacy: 'มีเพียงคุณสองคนที่เข้าถึงแชตนี้ได้ ระบบและ Azure Translator ประมวลผลข้อความ ไม่มีการเข้ารหัสแบบต้นทางถึงปลายทาง การพูดเพื่อพิมพ์ใช้บริการถอดเสียงของเบราว์เซอร์ ซึ่งอาจส่งเสียงไปยังผู้ให้บริการ Kiki ไม่บันทึกไฟล์เสียง', preview: 'ตัวอย่างบทสนทนา · ไม่ใช่ข้อความจริง', previewSend: 'นี่คือตัวอย่าง เข้าสู่ระบบเพื่อส่งข้อความจริง', signin: 'เข้าสู่พื้นที่ของคุณ', email: 'อีเมล', password: 'รหัสผ่าน', login: 'เข้าสู่ระบบ', back: 'กลับไปเข้าสู่ระบบ', viewPreview: 'ดูตัวอย่าง', setup: 'เชื่อมต่อโปรเจกต์ Supabase เพื่อเริ่มแชตส่วนตัว ดู README.md สำหรับวิธีตั้งค่า', enabled: 'เปิดการแจ้งเตือนแล้ว', refresh: 'เชื่อมต่ออีกครั้ง', loading: 'กำลังเปิดพื้นที่ของคุณ…' },
+  en: { tagline: 'A little place for the two of us.', chat: 'Our conversation', subtitle: 'Different languages. Same feeling.', settings: 'Our little space', notifications: 'Enable notifications', placeholder: 'Type a message', send: 'Send message', original: 'Original', translated: 'Translation', translating: 'Translating…', failed: 'Translation unavailable', retry: 'Try translation again', offline: 'You’re offline. Unsent messages can be retried when you reconnect.', pending: 'Sending…', unsent: 'Not sent · tap to retry', empty: 'Your story starts here.', emptySub: 'Send your first message. We’ll take care of the translation.', older: 'Earlier messages', signout: 'Sign out', yourLanguage: 'Your language', notificationNote: 'A gentle nudge when your person sends a message. Message text stays off the lock screen.', install: 'Make yourself at home', installNote: 'iPhone: open in Safari → Share → Add to Home Screen. Android: open in Chrome → menu → Install app. Then open Kiki from its icon to enable notifications.', privacy: 'Only the two of you can access this chat. Messages are processed by our backend and Azure Translator; they are not end-to-end encrypted. Dictation uses your browser’s speech service, which may send audio to its provider. Kiki does not save voice clips. Images are hosted by imgbb and can be viewed by anyone with their link.', preview: 'Preview conversation · these are sample messages', previewSend: 'This is a preview. Sign in to send a real message.', signin: 'Sign in to your space', email: 'Email', password: 'Password', login: 'Come on in', back: 'Back to sign in', viewPreview: 'Take a little look around', setup: 'Connect your Supabase project to start your private chat. See the setup guide in README.md.', enabled: 'Notifications enabled', refresh: 'Reconnect', loading: 'Opening your space…' },
+  th: { tagline: 'พื้นที่เล็ก ๆ ของเราสองคน', chat: 'บทสนทนาของเรา', subtitle: 'ต่างภาษา แต่ความรู้สึกเดียวกัน', settings: 'พื้นที่ของเรา', notifications: 'เปิดการแจ้งเตือน', placeholder: 'พิมพ์ข้อความ', send: 'ส่งข้อความ', original: 'ข้อความต้นฉบับ', translated: 'คำแปล', translating: 'กำลังแปล…', failed: 'แปลข้อความไม่ได้', retry: 'ลองแปลอีกครั้ง', offline: 'คุณออฟไลน์อยู่ ลองส่งข้อความอีกครั้งเมื่อเชื่อมต่อแล้ว', pending: 'กำลังส่ง…', unsent: 'ยังไม่ส่ง · แตะเพื่อลองอีกครั้ง', empty: 'เรื่องราวของเราเริ่มที่นี่', emptySub: 'ส่งข้อความแรก แล้วเราจะแปลให้', older: 'ข้อความก่อนหน้า', signout: 'ออกจากระบบ', yourLanguage: 'ภาษาของคุณ', notificationNote: 'แจ้งเตือนเมื่อคนพิเศษส่งข้อความ โดยไม่แสดงข้อความบนหน้าจอล็อก', install: 'เพิ่มไว้บนหน้าจอหลัก', installNote: 'iPhone: เปิดใน Safari → แชร์ → เพิ่มไปยังหน้าจอโฮม Android: เปิดใน Chrome → เมนู → ติดตั้งแอป แล้วเปิด Kiki จากไอคอนเพื่อเปิดการแจ้งเตือน', privacy: 'มีเพียงคุณสองคนที่เข้าถึงแชตนี้ได้ ระบบและ Azure Translator ประมวลผลข้อความ ไม่มีการเข้ารหัสแบบต้นทางถึงปลายทาง การพูดเพื่อพิมพ์ใช้บริการถอดเสียงของเบราว์เซอร์ ซึ่งอาจส่งเสียงไปยังผู้ให้บริการ Kiki ไม่บันทึกไฟล์เสียง รูปภาพเก็บไว้ที่ imgbb และผู้ที่มีลิงก์สามารถดูได้', preview: 'ตัวอย่างบทสนทนา · ไม่ใช่ข้อความจริง', previewSend: 'นี่คือตัวอย่าง เข้าสู่ระบบเพื่อส่งข้อความจริง', signin: 'เข้าสู่พื้นที่ของคุณ', email: 'อีเมล', password: 'รหัสผ่าน', login: 'เข้าสู่ระบบ', back: 'กลับไปเข้าสู่ระบบ', viewPreview: 'ดูตัวอย่าง', setup: 'เชื่อมต่อโปรเจกต์ Supabase เพื่อเริ่มแชตส่วนตัว ดู README.md สำหรับวิธีตั้งค่า', enabled: 'เปิดการแจ้งเตือนแล้ว', refresh: 'เชื่อมต่ออีกครั้ง', loading: 'กำลังเปิดพื้นที่ของคุณ…' },
 }
 
 function dayLabel(date: string, language: Language) {
@@ -44,6 +48,11 @@ export default function App() {
   const [messages, setMessages] = useState<Message[]>([])
   const [draft, setDraft] = useState('')
   const [dictating, setDictating] = useState(false)
+  const [image, setImage] = useState<File | null>(null)
+  const [imagePreview, setImagePreview] = useState('')
+  const [uploadingImage, setUploadingImage] = useState(false)
+  const imageInput = useRef<HTMLInputElement>(null)
+  const imageAbort = useRef<AbortController | null>(null)
   const [error, setError] = useState('')
   const [settings, setSettings] = useState(false)
   const [standalone, setStandalone] = useState(isStandalone)
@@ -73,7 +82,20 @@ export default function App() {
 
   useLayoutEffect(() => {
     if (textarea.current) resizeMessageInput(textarea.current)
-  }, [draft, isChat, authReady])
+  }, [draft, isChat, authReady, me?.id])
+
+  useEffect(() => {
+    if (!image) { setImagePreview(''); return }
+    const url = URL.createObjectURL(image)
+    setImagePreview(url)
+    return () => URL.revokeObjectURL(url)
+  }, [image])
+
+  useEffect(() => {
+    setImage(null)
+    imageAbort.current?.abort()
+    return () => { imageAbort.current?.abort() }
+  }, [session?.user.id])
 
   useEffect(() => {
     const displayMode = window.matchMedia('(display-mode: standalone)')
@@ -272,21 +294,45 @@ export default function App() {
   async function send(existing?: Message) {
     if (preview) { setError(t.previewSend); return }
     if (!supabase || !me || !session) return
-    if (!existing && dictating) return
-    const text = existing?.original || draft.trim()
-    if (!text || text.length > 2000) return
+    if (!existing && (dictating || imageAbort.current)) return
+    const text = existing ? existing.original : draft.trim()
+    let imageUrl = existing?.image_url || null
+    if ((!text && !imageUrl && !image) || text.length > 2000) return
+    const userId = session.user.id
+    if (!existing && image) {
+      const controller = new AbortController()
+      imageAbort.current = controller
+      setUploadingImage(true)
+      setError('')
+      try {
+        const mime = await validateSelectedImage(image)
+        if (controller.signal.aborted) return
+        const { data, error } = await supabase.functions.invoke('upload-image', {
+          body: image, headers: { 'Content-Type': mime }, signal: controller.signal, timeout: 45_000,
+        })
+        if (controller.signal.aborted || userRef.current !== userId) return
+        if (error || !isMessageImageUrl(data?.image_url)) throw new Error('Upload failed')
+        imageUrl = data.image_url
+      } catch {
+        if (!controller.signal.aborted && userRef.current === userId) setError(language === 'en'
+          ? 'Could not upload the image. Your photo and caption are still here; try Send again.'
+          : 'อัปโหลดรูปภาพไม่ได้ ยังเก็บรูปภาพและข้อความไว้ โปรดลองส่งอีกครั้ง')
+        return
+      } finally {
+        if (imageAbort.current === controller) { imageAbort.current = null; setUploadingImage(false) }
+      }
+    }
     const message: Message = existing || {
       id: crypto.randomUUID(), sender_id: me.id, original: text, source_language: me.language,
-      translation: null, translation_status: 'pending', translation_attempted_at: null, created_at: new Date().toISOString(),
+      image_url: imageUrl, translation: null, translation_status: text ? 'pending' : 'ready', translation_attempted_at: null, created_at: new Date().toISOString(),
     }
     if (retryLocks.current.has(message.id)) return
     retryLocks.current.add(message.id)
-    const userId = session.user.id
     setMessages(current => mergeMessages(current, [{ ...message, local_status: 'sending' }]))
-    if (!existing) setDraft('')
+    if (!existing) { setDraft(''); setImage(null) }
     setError('')
     try {
-      const { data, error } = await supabase.from('messages').insert({ id: message.id, sender_id: me.id, original: text, source_language: me.language }).select().abortSignal(AbortSignal.timeout(15_000)).single()
+      const { data, error } = await supabase.from('messages').insert({ id: message.id, sender_id: me.id, original: text, source_language: me.language, ...(imageUrl ? { image_url: imageUrl } : {}) }).select().abortSignal(AbortSignal.timeout(15_000)).single()
       if (error) {
         if (error.code === '23505') {
           const { data: saved, error: readError } = await supabase.from('messages').select('*').eq('id', message.id).single()
@@ -304,6 +350,17 @@ export default function App() {
         setError(reason || 'Could not send. Your message is saved on this device; tap it to retry.')
       }
     } finally { retryLocks.current.delete(message.id) }
+  }
+
+  async function chooseImage(file?: File) {
+    if (!file || imageAbort.current || !me) return
+    const userId = session?.user.id
+    try {
+      await validateSelectedImage(file)
+      if (userRef.current !== userId) return
+      setImage(file)
+      setError('')
+    } catch { setError(language === 'en' ? 'Choose a JPEG, PNG, WebP or GIF image under 10 MB.' : 'เลือกรูปภาพ JPEG, PNG, WebP หรือ GIF ขนาดไม่เกิน 10 MB') }
   }
 
   async function retryTranslation(message: Message) {
@@ -426,7 +483,8 @@ export default function App() {
               {newDay && <div className="date-divider"><span>{dayLabel(message.created_at, language)}</span></div>}
               <article data-message-id={own ? undefined : message.id} className={`message-row ${own ? 'own' : 'incoming'}`}>
                 <div className="message-content"><div className={`message-bubble ${message.local_status === 'failed' ? 'unsent' : ''}`}>
-                  {translated ? <AlignedMessage message={message} own={own} language={language} label={own ? t.translated : t.original} footer={footer} /> : <><p lang={message.source_language}>{message.original}</p>{!message.local_status && <div className="translation-status"><Icon name="globe" size={12} />{message.translation_status === 'failed' ? t.failed : t.translating}{!preview && canRetryTranslation(message) && <button disabled={retrying.includes(message.id)} onClick={() => void retryTranslation(message)}>{t.retry}</button>}</div>}</>}
+                  {message.image_url && <ImageMessage url={message.image_url} language={language} />}
+                  {message.original && (translated ? <AlignedMessage message={message} own={own} language={language} label={own ? t.translated : t.original} footer={footer} /> : <><p lang={message.source_language}>{message.original}</p>{!message.local_status && <div className="translation-status"><Icon name="globe" size={12} />{message.translation_status === 'failed' ? t.failed : t.translating}{!preview && canRetryTranslation(message) && <button disabled={retrying.includes(message.id)} onClick={() => void retryTranslation(message)}>{t.retry}</button>}</div>}</>)}
                   {!translated && footer}
                 </div></div>
               </article>
@@ -434,9 +492,17 @@ export default function App() {
           })}<div ref={bottom} />
         </section>
         <form className="composer" onSubmit={event => { event.preventDefault(); void send() }}>
-          <div className="composer-box"><div className="composer-input"><textarea ref={textarea} aria-label={t.placeholder} placeholder={t.placeholder} value={draft} maxLength={2000} rows={1} onChange={event => setDraft(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && !matchMedia('(pointer: coarse)').matches) { event.preventDefault(); void send() } }} />{!preview && me && <Dictation key={me.id} language={me.language} disabled={!online} onBusyChange={setDictating} onTranscript={text => {
+          {image && <div className="attachment-preview">
+            {imagePreview && <img src={imagePreview} alt={language === 'en' ? 'Selected image' : 'รูปภาพที่เลือก'} />}
+            <span role="status">{uploadingImage ? language === 'en' ? 'Uploading image…' : 'กำลังอัปโหลดรูปภาพ…' : language === 'en' ? 'Add a caption below, or send the image.' : 'เพิ่มข้อความด้านล่าง หรือส่งรูปภาพได้เลย'}</span>
+            <button type="button" className="icon-button" aria-label={language === 'en' ? 'Remove image' : 'ลบรูปภาพ'} onClick={() => { imageAbort.current?.abort(); setImage(null) }}><Icon name="close" /></button>
+          </div>}
+          <div className="composer-box"><div className="composer-input">{!preview && me && <>
+            <input ref={imageInput} type="file" accept={imageAccept} hidden onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; void chooseImage(file) }} />
+            <button type="button" className="icon-button image-button" aria-label={language === 'en' ? 'Attach image' : 'แนบรูปภาพ'} disabled={uploadingImage || !online} onClick={() => imageInput.current?.click()}><Icon name="image" /></button>
+          </>}<textarea ref={textarea} aria-label={t.placeholder} placeholder={image ? language === 'en' ? 'Add a caption (optional)' : 'เพิ่มข้อความ (ไม่จำเป็น)' : t.placeholder} disabled={uploadingImage} value={draft} maxLength={2000} rows={1} onChange={event => setDraft(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && !matchMedia('(pointer: coarse)').matches) { event.preventDefault(); void send() } }} />{!preview && me && <Dictation key={me.id} language={me.language} disabled={uploadingImage || !online} onBusyChange={setDictating} onTranscript={text => {
             setDraft(current => appendDictation(current, text))
-          }} />}</div><button className="send-button" aria-label={t.send} disabled={dictating || !draft.trim() || draft.length > 2000 || (!preview && !me)} type="submit"><Icon name="send" size={19} /></button></div>
+          }} />}</div><button className="send-button" aria-label={t.send} disabled={uploadingImage || dictating || (!draft.trim() && !image) || draft.length > 2000 || (!preview && !me)} type="submit"><Icon name="send" size={19} /></button></div>
           {draft.length > 2000 && <p className="draft-limit" role="alert">{language === 'en' ? 'Your text is kept. Shorten it to 2,000 characters before sending.' : 'เก็บข้อความไว้แล้ว โปรดย่อให้ไม่เกิน 2,000 ตัวอักษรก่อนส่ง'}</p>}
           <div className={`composer-caption${draft.length > 1800 ? ' has-count' : ''}`}><span><Icon name="globe" size={11} />{language === 'en' ? 'English → Thai, automatically' : 'ไทย → English แปลให้อัตโนมัติ'}</span><span>{draft.length > 1800 ? `${draft.length}/2000` : <><Icon name="heart" size={10} /> Just us two</>}</span></div>
         </form>

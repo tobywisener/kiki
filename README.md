@@ -1,6 +1,6 @@
 # Kiki
 
-A private, installable Thai–English chat for two people. React + Vite frontend, Supabase Auth/Postgres/Realtime, Azure Translator with word alignment, browser dictation with react-speech-recognition, and standards-based Web Push.
+A private, installable Thai–English chat for two people. React + Vite frontend, Supabase Auth/Postgres/Realtime, Azure Translator with word alignment, browser dictation with react-speech-recognition, imgbb image attachments, and standards-based Web Push.
 
 Messages are saved and delivered before translation finishes. The recipient sees the translation with an expandable original. Unsent messages and drafts are kept on the device for retry. Notifications contain a generic alert, never message text.
 
@@ -26,7 +26,7 @@ The project's local `.env` is ignored by Git. Keep it private. No credentials be
 4. Create two confirmed users under **Authentication → Users → Add user → Create new user**. Each of you chooses your own app password. These are app logins, not separate Supabase projects or subscriptions.
 5. Set `KIKI_EN_EMAIL`, `KIKI_TH_EMAIL`, `KIKI_EN_NAME`, and `KIKI_TH_NAME` in the local `.env`. Run `npm run db:members` to assign the existing accounts. No invitation emails are sent by this script.
 
-Exactly one member per language is allowed. Only those members can read history and send as themselves. The browser cannot edit saved messages, set translation results, set server timestamps, or write device subscriptions directly. Subscriptions are validated through an authenticated server function. Text is limited to 2,000 characters and sending to 20 messages/person/minute.
+Exactly one member per language is allowed. Only those members can read history and send as themselves. The browser cannot edit saved messages, set translation results, set server timestamps, or write device subscriptions directly. Subscriptions are validated through an authenticated server function. Text and optional image captions are limited to 2,000 characters and sending to 20 messages/person/minute.
 
 Database scripts verify TLS using Supabase's official root certificate in `supabase/root-ca.crt`, downloaded from the database settings page. To use a replacement certificate, set `SUPABASE_DB_CA_PATH`. They never disable certificate verification.
 
@@ -39,7 +39,7 @@ Database scripts verify TLS using Supabase's official root certificate in `supab
 5. Run `npm run deploy:backend`. This uploads only the required server secrets, deploys the functions, and installs the message-insert webhook. It does not upload the database password. Temporary secret files are removed afterward.
 6. Rebuild the frontend with `VITE_VAPID_PUBLIC_KEY` set to the generated public key.
 
-Supabase provides `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` to its functions automatically. No service-role key is needed in the frontend or local `.env`. Gateway JWT verification is disabled for these functions because the message endpoint accepts database webhooks; the handlers explicitly validate either the webhook secret or a real user JWT and chat membership. The subscription endpoint always requires a member JWT.
+Supabase provides `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` to its functions automatically. No service-role key is needed in the frontend or local `.env`. Gateway JWT verification is disabled for these functions because the message endpoint accepts database webhooks; the handlers explicitly validate either the webhook secret or a real user JWT and chat membership. The subscription and image-upload endpoints always require a member JWT.
 
 The webhook is asynchronous through `pg_net`; its secret is stored in Supabase Vault. It reads the canonical message by ID instead of trusting text in the webhook body. Translation leases prevent concurrent processing and limit each message to five attempts, spaced at least a minute apart. Both people can manually retry a failed or stale translation. Translation calls time out after 15 seconds. Originals are retained on failure.
 
@@ -56,6 +56,16 @@ Dictation uses [react-speech-recognition](https://github.com/JamesBrill/react-sp
 3. Test a short English sentence on the English account and a Thai sentence on the Thai account. Check that the existing draft is preserved, Stop works, and the result can be edited before sending. Test the installed app too if you normally use it.
 
 Browser and language support vary. Unsupported browsers show a dictation notice and leave typing available. Recognition errors keep your existing draft. An internet connection is normally required, and the browser may send audio to its speech service provider (for example Google or Apple); this is not guaranteed offline dictation. Kiki does not record or store voice clips, or send audio to Supabase/Azure Speech. Preview conversations do not activate the microphone. [Browser API documentation](https://developer.mozilla.org/en-US/docs/Web/API/SpeechRecognition)
+
+## Send images
+
+Tap the image button inside the message box, choose a JPEG, PNG, WebP or GIF under 10 MB, and review the preview. Add an optional caption, then tap Send. The image is uploaded only when you send; Cancel removes the selected image and aborts an in-flight upload. Tap a received or sent image to open it at full size. Captions use the usual Thai↔English translation; images without captions do not call Translator. Notifications and delivery/read ticks work as usual.
+
+Images use the same imgbb API as Musicdiary, through Kiki's authenticated `upload-image` function. Set `IMGBB_API_KEY` in the server-only `.env`, run `npm run db:migrate`, deploy the backend, then deploy the frontend. The existing Musicdiary key can be reused. Never give this key a `VITE_` prefix. No Supabase Storage bucket is used: the message stores only the imgbb URL and optional caption. [imgbb API documentation](https://api.imgbb.com/)
+
+An upload failure keeps the photo and caption for retry. If the upload succeeds but sending the message fails, the imgbb URL is saved in the existing unsent-message queue, so retrying does not upload it again. Selected files stay in memory until sent or removed; reload/sign-out discards an unuploaded selection. An interrupted request may leave an image on imgbb even if no message was saved. Kiki does not provide image deletion or automatic expiry.
+
+**Image links are accessible to anyone who has them.** imgbb does not enforce Kiki membership or provide end-to-end encryption. Uploaded photos remain hosted by imgbb; their availability depends on that service. The caption and conversation record remain restricted to the two chat members. HEIC files must be exported as JPEG/PNG if the phone picker does not convert them.
 
 ## Learn from both languages
 
@@ -122,11 +132,13 @@ Notification permission must follow a button tap. If it was denied, allow it in 
 npm test
 npm run test:backend
 npm run build
-npx --yes --package=deno deno check supabase/functions/process-message/index.ts supabase/functions/save-subscription/index.ts
+npx --yes --package=deno deno check supabase/functions/process-message/index.ts supabase/functions/save-subscription/index.ts supabase/functions/upload-image/index.ts
 ```
 
 For the browser dictation self-check, run `npm run dev` and open `http://127.0.0.1:5173/tests/dictation-browser.html`. It should report **ALL CHECKS PASSED**. Also open that URL with `?unsupported` to check the typing fallback. These checks use synthetic recognition events with the real component and library, without microphone access or service requests.
 
-Tests exercise real PostgreSQL permissions with PGlite, translation leases, rate limits, duplicates, push endpoint validation, message merging, word/phrase alignment, dictation draft preservation and mocked browser recognition, and PWA assets. They do not use or modify the live chat. Test dictation, translation, and closed-app notifications on both actual phones before relying on them.
+The image-message UI self-check is at `http://127.0.0.1:5173/tests/images-browser.html` while the dev server runs. It uses the real app with synthetic files and mocked Supabase to test preview/cancel, optional captions, failures, retries, and sign-out without sending a live chat message.
 
-Chat history stores text only, including reviewed dictation. Messages are processed by Supabase and Azure Translator and are not end-to-end encrypted. Dictation audio is handled by the browser’s speech service. Standard translation may miss tone or slang. The Supabase Free project may pause during low activity and does not include automatic backups; export important history periodically. No translation key, app accounts, or hosting account is provisioned automatically.
+Tests exercise real PostgreSQL permissions with PGlite, translation leases, rate limits, duplicates, push endpoint validation, message merging, word/phrase alignment, dictation draft preservation and mocked browser recognition, image validation and imgbb failures, and PWA assets. They do not use or modify the live chat. Test dictation, translation, and closed-app notifications on both actual phones before relying on them.
+
+Chat history stores text, including reviewed dictation and image captions, plus imgbb image URLs. Messages are processed by Supabase and Azure Translator and are not end-to-end encrypted. Dictation audio is handled by the browser’s speech service. Standard translation may miss tone or slang. The Supabase Free project may pause during low activity and does not include automatic backups; export important history periodically. No translation key, app accounts, or hosting account is provisioned automatically.

@@ -18,6 +18,7 @@ if (!process.env.MESSAGE_WEBHOOK_SECRET) {
 }
 names.push('MESSAGE_WEBHOOK_SECRET')
 if (process.env.AZURE_TRANSLATOR_REGION) names.push('AZURE_TRANSLATOR_REGION')
+if (process.env.IMGBB_API_KEY) names.push('IMGBB_API_KEY')
 const temp = mkdtempSync(join(tmpdir(), 'kiki-secrets-'))
 const secretsFile = join(temp, '.env')
 function run(command, args) {
@@ -27,7 +28,7 @@ function run(command, args) {
 try {
   writeFileSync(secretsFile, names.map(name => `${name}=${JSON.stringify(process.env[name])}`).join('\n') + '\n', { mode: 0o600 })
   run('npx', ['--yes', 'supabase@2.120.0', 'secrets', 'set', '--project-ref', projectRef, '--env-file', secretsFile])
-  for (const name of ['process-message', 'save-subscription']) {
+  for (const name of ['process-message', 'save-subscription', 'upload-image']) {
     run('npx', ['--yes', 'supabase@2.120.0', 'functions', 'deploy', name, '--project-ref', projectRef, '--use-api'])
   }
   run(process.execPath, ['scripts/database.mjs', 'webhook'])

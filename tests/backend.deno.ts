@@ -6,8 +6,9 @@ const serve = Deno.serve
 Deno.serve = ((handler: (request: Request) => Promise<Response>) => { handlers.push(handler) }) as typeof Deno.serve
 await import('../supabase/functions/process-message/index.ts')
 await import('../supabase/functions/save-subscription/index.ts')
+await import('../supabase/functions/upload-image/index.ts')
 Deno.serve = serve
-const [processMessage, saveSubscription] = handlers
+const [processMessage, saveSubscription, uploadImage] = handlers
 
 const id = '9157f11a-07aa-4ead-94e1-3a00fdb9f711'
 const userId = '11111111-1111-4111-8111-111111111111'
@@ -25,6 +26,7 @@ function configure() {
   Deno.env.set('MESSAGE_WEBHOOK_SECRET', secret)
   Deno.env.set('AZURE_TRANSLATOR_KEY', 'test-only-azure-key')
   Deno.env.set('AZURE_TRANSLATOR_REGION', 'westeurope')
+  Deno.env.set('IMGBB_API_KEY', 'test-only-imgbb-key')
   Deno.env.delete('VAPID_PRIVATE_KEY')
   globalThis.fetch = () => { throw new Error('Unexpected network request') }
 }
@@ -32,7 +34,7 @@ function configure() {
 Deno.test('all functions reject callers without a member JWT or valid webhook secret', async () => {
   configure()
   try {
-    for (const handler of [processMessage, saveSubscription]) {
+    for (const handler of [processMessage, saveSubscription, uploadImage]) {
       assert.equal((await handler(new Request('https://local.test', { method: 'POST', body: '{}' }))).status, 401)
     }
     assert.equal((await processMessage(new Request('https://local.test', { method: 'POST', headers: { 'x-webhook-secret': 'wrong' }, body: JSON.stringify(event) }))).status, 401)
@@ -48,7 +50,7 @@ Deno.test('an authenticated outsider cannot process translations or register a d
     throw new Error('Unexpected request')
   }
   try {
-    for (const handler of [processMessage, saveSubscription]) {
+    for (const handler of [processMessage, saveSubscription, uploadImage]) {
       assert.equal((await handler(new Request('https://local.test', { method: 'POST', headers: { Authorization: 'Bearer fake-user-jwt' }, body: '{}' }))).status, 401)
     }
   } finally { globalThis.fetch = fakeFetch }
@@ -196,6 +198,80 @@ Deno.test('unavailable or malformed pronunciation preserves a successful Thai me
       }
       assert.equal((await processMessage(webhook(event))).status, 200)
       assert.deepEqual(saved, { translation: 'Hello', alignment: [], thai_romanization: null, thai_pronunciation_parts: [], translation_status: 'ready' })
+    }
+  } finally { globalThis.fetch = fakeFetch }
+})
+
+const imageBytes = Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 0])
+const imageUrl = 'https://i.ibb.co/abc/kiki-test.png'
+const imageRequest = (bytes: Uint8Array<ArrayBuffer> = imageBytes, type = 'image/png') => new Request('https://local.test/upload-image', {
+  method: 'POST', headers: { Authorization: 'Bearer fake-user-jwt', 'Content-Type': type }, body: bytes,
+})
+
+Deno.test('image uploads authenticate membership and send binary images to imgbb with a server-only key', async () => {
+  configure()
+  let uploads = 0
+  globalThis.fetch = async (input, init) => {
+    const url = String(input)
+    if (url.includes('/auth/v1/user')) return response({ id: userId })
+    if (url.includes('/rest/v1/members')) return response({ id: userId, language: 'th' })
+    if (url === 'https://api.imgbb.com/1/upload') {
+      uploads++
+      assert.equal(init?.method, 'POST')
+      const form = init?.body as FormData
+      assert.equal(form.get('key'), 'test-only-imgbb-key')
+      assert.equal(form.has('expiration'), false)
+      assert.equal((form.get('image') as File).type, 'image/png')
+      assert.deepEqual(new Uint8Array(await (form.get('image') as File).arrayBuffer()), imageBytes)
+      return response({ data: { url: imageUrl, delete_url: 'do-not-expose-deletion-token' }, success: true })
+    }
+    throw new Error('Unexpected network or storage request')
+  }
+  try {
+    const result = await uploadImage(imageRequest())
+    assert.equal(result.status, 200)
+    assert.deepEqual(await result.json(), { image_url: imageUrl })
+    assert.equal(uploads, 1)
+    assert.equal((await uploadImage(new Request('https://local.test', { method: 'OPTIONS' }))).status, 200)
+    assert.equal((await uploadImage(new Request('https://local.test', { method: 'GET' }))).status, 405)
+  } finally { globalThis.fetch = fakeFetch }
+})
+
+Deno.test('image uploads reject unsupported, oversized, and mislabeled bodies before contacting imgbb', async () => {
+  configure()
+  globalThis.fetch = async input => {
+    const url = String(input)
+    if (url.includes('/auth/v1/user')) return response({ id: userId })
+    if (url.includes('/rest/v1/members')) return response({ id: userId })
+    throw new Error('Provider must not be contacted')
+  }
+  try {
+    assert.equal((await uploadImage(imageRequest(new TextEncoder().encode('<svg/>'), 'image/svg+xml'))).status, 415)
+    assert.equal((await uploadImage(imageRequest(imageBytes, 'image/jpeg'))).status, 415)
+    assert.equal((await uploadImage(imageRequest(new Uint8Array(10 * 1024 * 1024 + 1)))).status, 413)
+    Deno.env.delete('IMGBB_API_KEY')
+    assert.equal((await uploadImage(imageRequest())).status, 503)
+  } finally { globalThis.fetch = fakeFetch }
+})
+
+Deno.test('image provider failures or unsafe links produce a retryable error without returning provider details', async () => {
+  try {
+    for (const failure of ['network', 'http', 'malformed', 'url']) {
+      configure()
+      globalThis.fetch = async input => {
+        const url = String(input)
+        if (url.includes('/auth/v1/user')) return response({ id: userId })
+        if (url.includes('/rest/v1/members')) return response({ id: userId })
+        if (url === 'https://api.imgbb.com/1/upload') {
+          if (failure === 'network') throw new Error('Provider key must never leak')
+          if (failure === 'http') return response({ error: { message: 'Private provider details' } }, 503)
+          return response(failure === 'malformed' ? { data: { url: 42 } } : { data: { url: 'https://attacker.test/photo.png' } })
+        }
+        throw new Error('Unexpected request')
+      }
+      const result = await uploadImage(imageRequest())
+      assert.equal(result.status, 502)
+      assert.deepEqual(await result.json(), { error: 'Could not upload the image. Please try again.' })
     }
   } finally { globalThis.fetch = fakeFetch }
 })
