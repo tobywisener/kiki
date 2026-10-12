@@ -5,7 +5,7 @@ import type { Language } from './messages'
 const copy = {
   en: {
     start: 'Dictate a message', stop: 'Stop dictation', starting: 'Allow microphone access…',
-    listening: 'Listening in English…', stopping: 'Finishing dictation…', review: 'Check the text before sending.',
+    listening: 'Listening in English…', stopping: 'Finishing dictation…', review: 'Check the text before sending.', dismiss: 'Dismiss dictation notice',
     microphone: 'Allow microphone access in your browser settings, then reload to try again.',
     unsupported: 'This browser does not support dictation. You can still type a message.',
     failed: 'Dictation failed. Check your connection and try again. Your draft is kept.',
@@ -14,7 +14,7 @@ const copy = {
   },
   th: {
     start: 'พูดเพื่อพิมพ์ข้อความ', stop: 'หยุดการพูด', starting: 'โปรดอนุญาตให้ใช้ไมโครโฟน…',
-    listening: 'กำลังฟังภาษาไทย…', stopping: 'กำลังจบการถอดเสียง…', review: 'ตรวจสอบข้อความก่อนส่ง',
+    listening: 'กำลังฟังภาษาไทย…', stopping: 'กำลังจบการถอดเสียง…', review: 'ตรวจสอบข้อความก่อนส่ง', dismiss: 'ปิดข้อความแจ้งเตือนการถอดเสียง',
     microphone: 'โปรดอนุญาตให้ใช้ไมโครโฟนในการตั้งค่าเบราว์เซอร์ แล้วโหลดหน้าใหม่เพื่อลองอีกครั้ง',
     unsupported: 'เบราว์เซอร์นี้ไม่รองรับการพูดเพื่อพิมพ์ คุณยังพิมพ์ข้อความได้',
     failed: 'ถอดเสียงไม่ได้ โปรดตรวจสอบการเชื่อมต่อแล้วลองอีกครั้ง ข้อความที่พิมพ์ไว้ยังอยู่',
@@ -39,6 +39,12 @@ export default function DictationControl({ language, disabled, onTranscript, onB
   useEffect(() => { transcriptHandler.current = onTranscript }, [onTranscript])
 
   useEffect(() => { onBusyChange(busy) }, [busy, onBusyChange])
+
+  useEffect(() => {
+    if (busy || notice !== t.review) return
+    const timer = window.setTimeout(() => setNotice(''), 4_000)
+    return () => window.clearTimeout(timer)
+  }, [busy, notice, t.review])
 
   useEffect(() => {
     const recognition = SpeechRecognition.getRecognition()
@@ -121,6 +127,9 @@ export default function DictationControl({ language, disabled, onTranscript, onB
     </button>
     {(!supported || !isMicrophoneAvailable || busy || notice) && <div className="dictation-status">
       <span role="status">{!supported ? t.unsupported : !isMicrophoneAvailable ? t.microphone : pending ? t[pending] : listening ? t.listening : notice}</span>
+      {supported && isMicrophoneAvailable && !busy && notice && <button type="button" aria-label={t.dismiss} title={t.dismiss} onClick={() => setNotice('')}>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="m6 6 12 12M6 18 18 6" /></svg>
+      </button>}
     </div>}
   </div>
 }

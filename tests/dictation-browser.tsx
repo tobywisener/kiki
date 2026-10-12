@@ -1,6 +1,7 @@
-import React, { act, useState } from 'react'
+import React, { act, useLayoutEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { appendDictation } from '../src/dictation'
+import { resizeMessageInput } from '../src/composer'
 
 // Exercise the actual React component and library without recording or calling any service.
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
@@ -29,16 +30,20 @@ const { default: Dictation } = await import('../src/DictationControl')
 const root = createRoot(document.getElementById('root')!)
 let edit: (draft: string) => void
 let limit: (() => void) | undefined
+let dismissReview: (() => void) | undefined
 const originalTimeout = window.setTimeout.bind(window)
 window.setTimeout = ((handler: TimerHandler, delay?: number, ...args: unknown[]) => {
   if (delay === 60_000 && typeof handler === 'function') limit = handler as () => void
+  if (delay === 4_000 && typeof handler === 'function') dismissReview = handler as () => void
   return originalTimeout(handler, delay, ...args)
 }) as typeof window.setTimeout
 function Composer({ language = 'en' }: { language?: 'en' | 'th' }) {
   const [draft, setDraft] = useState('Existing draft.')
   const [busy, setBusy] = useState(false)
+  const textarea = useRef<HTMLTextAreaElement>(null)
+  useLayoutEffect(() => { if (textarea.current) resizeMessageInput(textarea.current) }, [draft])
   edit = setDraft
-  return <div><textarea aria-label="Draft" value={draft} onChange={e => setDraft(e.target.value)} />
+  return <div><textarea ref={textarea} aria-label="Draft" value={draft} onChange={e => setDraft(e.target.value)} />
     <Dictation language={language} disabled={false} onBusyChange={setBusy} onTranscript={text => setDraft(current => appendDictation(current, text))} />
     <button data-send disabled={busy || draft.length > 2000}>Send</button></div>
 }
@@ -68,11 +73,20 @@ try {
     check(draft() === 'Existing draft. Hello.', 'Final words append once; duplicate event is ignored')
     await step(() => microphone().click())
     check(recognition.stops === 1 && !send().disabled, 'Stop releases listening and permits review/send')
+    check(document.body.textContent!.includes('Check the text before sending.'), 'English review notice appears after dictation')
+    await step(() => dismissReview!())
+    check(!document.querySelector('.dictation-status') && draft() === 'Existing draft. Hello.', 'English review notice expires without removing the dictated text')
     await step(() => edit('Edited while dictating.'))
     await step(() => microphone().click())
     await step(() => recognition.result('Second attempt.'))
     await step(() => recognition.end())
     check(draft() === 'Edited while dictating. Second attempt.' && !send().disabled, 'Second dictation preserves edits and starts with a fresh transcript')
+    await step(() => document.querySelector<HTMLButtonElement>('[aria-label="Dismiss dictation notice"]')!.click())
+    check(!document.querySelector('.dictation-status'), 'Review notice can also be dismissed immediately')
+    await step(() => edit('A multiline\ndraft'))
+    await step(() => edit(''))
+    check(document.querySelector('textarea')!.style.height === 'auto', 'Clearing a programmatic draft removes the previous explicit input height')
+    await step(() => edit('Edited while dictating. Second attempt.'))
     await step(() => microphone().click())
     await step(() => recognition.emit('error', { error: 'network' }))
     await step(() => recognition.end())
@@ -84,6 +98,9 @@ try {
     check(recognition.lang === 'th-TH' && draft() === 'Existing draft. สวัสดี คิดถึงนะ', 'Thai locale appends Thai text to the message box')
     await step(() => limit!())
     check(!send().disabled && !recognition.active, 'One-minute limit stops the microphone')
+    check(document.body.textContent!.includes('ตรวจสอบข้อความก่อนส่ง'), 'Thai review notice appears after dictation')
+    await step(() => dismissReview!())
+    check(!document.querySelector('.dictation-status') && draft() === 'Existing draft. สวัสดี คิดถึงนะ', 'Thai review notice expires without removing the dictated text')
     await step(() => microphone().click())
     await step(() => {
       Object.defineProperty(document, 'hidden', { value: true, configurable: true })

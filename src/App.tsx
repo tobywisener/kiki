@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { supabase, vapidPublicKey, mergeMessages, canRetryTranslation, toApplicationServerKey } from './lib'
 import type { Language, Member, Message } from './lib'
@@ -6,6 +6,7 @@ import { demoMembers, demoMessages } from './demo'
 import AlignedMessage from './AlignedMessage'
 import Dictation from './DictationControl'
 import { appendDictation } from './dictation'
+import { resizeMessageInput } from './composer'
 import { isStandalone, installInstructions } from './pwa'
 import { canMarkRead, receiptStatus } from './messages'
 
@@ -69,6 +70,10 @@ export default function App() {
   const partner = (preview ? demoMembers : members).find(member => member.id !== me?.id)
   const shownMessages = preview ? demoMessages : messages
   const isChat = preview || !!session
+
+  useLayoutEffect(() => {
+    if (textarea.current) resizeMessageInput(textarea.current)
+  }, [draft, isChat, authReady])
 
   useEffect(() => {
     const displayMode = window.matchMedia('(display-mode: standalone)')
@@ -429,11 +434,8 @@ export default function App() {
           })}<div ref={bottom} />
         </section>
         <form className="composer" onSubmit={event => { event.preventDefault(); void send() }}>
-          <div className="composer-box"><div className="composer-input"><textarea ref={textarea} aria-label={t.placeholder} placeholder={t.placeholder} value={draft} maxLength={2000} rows={1} onChange={event => { setDraft(event.target.value); event.target.style.height = 'auto'; event.target.style.height = `${Math.min(event.target.scrollHeight, 140)}px` }} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && !matchMedia('(pointer: coarse)').matches) { event.preventDefault(); void send() } }} />{!preview && me && <Dictation key={me.id} language={me.language} disabled={!online} onBusyChange={setDictating} onTranscript={text => {
+          <div className="composer-box"><div className="composer-input"><textarea ref={textarea} aria-label={t.placeholder} placeholder={t.placeholder} value={draft} maxLength={2000} rows={1} onChange={event => setDraft(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && !matchMedia('(pointer: coarse)').matches) { event.preventDefault(); void send() } }} />{!preview && me && <Dictation key={me.id} language={me.language} disabled={!online} onBusyChange={setDictating} onTranscript={text => {
             setDraft(current => appendDictation(current, text))
-            requestAnimationFrame(() => {
-              if (textarea.current) { textarea.current.style.height = 'auto'; textarea.current.style.height = `${Math.min(textarea.current.scrollHeight, 140)}px` }
-            })
           }} />}</div><button className="send-button" aria-label={t.send} disabled={dictating || !draft.trim() || draft.length > 2000 || (!preview && !me)} type="submit"><Icon name="send" size={19} /></button></div>
           {draft.length > 2000 && <p className="draft-limit" role="alert">{language === 'en' ? 'Your text is kept. Shorten it to 2,000 characters before sending.' : 'เก็บข้อความไว้แล้ว โปรดย่อให้ไม่เกิน 2,000 ตัวอักษรก่อนส่ง'}</p>}
           <div className={`composer-caption${draft.length > 1800 ? ' has-count' : ''}`}><span><Icon name="globe" size={11} />{language === 'en' ? 'English → Thai, automatically' : 'ไทย → English แปลให้อัตโนมัติ'}</span><span>{draft.length > 1800 ? `${draft.length}/2000` : <><Icon name="heart" size={10} /> Just us two</>}</span></div>
