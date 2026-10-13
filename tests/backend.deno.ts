@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import webpush from 'npm:web-push@3.6.7'
 
 // Capture the actual deployed handlers without starting a listening server.
 const handlers: ((request: Request) => Promise<Response>)[] = []
@@ -274,4 +275,57 @@ Deno.test('image provider failures or unsafe links produce a retryable error wit
       assert.deepEqual(await result.json(), { error: 'Could not upload the image. Please try again.' })
     }
   } finally { globalThis.fetch = fakeFetch }
+})
+
+Deno.test('webhook notifications use canonical sender names, text previews, and localized photo labels', async () => {
+  const originalSend = webpush.sendNotification
+  const recipientId = '22222222-2222-4222-8222-222222222222'
+  try {
+    for (const [language, original, image, expected] of [
+      ['en', 'คิดถึงนะ 💛', null, 'คิดถึงนะ 💛'],
+      ['th', 'Hello\nthere!', null, 'Hello there!'],
+      ['en', '', imageUrl, '📷 Photo'],
+      ['th', '', imageUrl, '📷 รูปภาพ'],
+      ['en', 'Our dinner 🍜', imageUrl, '📷 Our dinner 🍜'],
+    ]) {
+      configure()
+      Deno.env.set('VAPID_PUBLIC_KEY', 'test-only-public-key')
+      Deno.env.set('VAPID_PRIVATE_KEY', 'test-only-private-key')
+      Deno.env.set('VAPID_SUBJECT', 'mailto:tests@example.test')
+      const sent: { title: string; body: string; tag: string }[] = []
+      let claims = 0
+      webpush.sendNotification = ((_subscription: unknown, payload: string) => {
+        sent.push(JSON.parse(payload))
+        return Promise.resolve({ statusCode: 201, body: '', headers: {} })
+      }) as typeof webpush.sendNotification
+      globalThis.fetch = async (input, init) => {
+        const url = String(input)
+        if (url.includes('/rpc/claim_translation')) return response([])
+        if (url.includes('/rest/v1/messages')) {
+          if (init?.method === 'PATCH') {
+            claims++
+            assert.equal(new URL(url).searchParams.get('select'), 'id,sender_id,original,image_url')
+            return response(claims === 1 ? { id, sender_id: userId, original, image_url: image } : null)
+          }
+          return response({ id })
+        }
+        if (url.includes('/rest/v1/members')) return response([
+          { id: userId, name: 'Actual sender', language: language === 'en' ? 'th' : 'en' },
+          { id: recipientId, name: 'Recipient', language },
+        ])
+        if (url.includes('/rest/v1/push_subscriptions')) {
+          assert.equal(new URL(url).searchParams.get('user_id'), `eq.${recipientId}`)
+          return response([
+            { endpoint: 'https://web.push.apple.com/test-device', p256dh: 'test-only', auth: 'test-only' },
+            { endpoint: 'https://attacker.test/not-a-push-service', p256dh: 'test-only', auth: 'test-only' },
+          ])
+        }
+        throw new Error('Unexpected request')
+      }
+      assert.equal((await processMessage(webhook({ ...event, record: { id, original: 'Forged preview', sender_id: recipientId } }))).status, 200)
+      assert.deepEqual(sent, [{ title: 'Actual sender', body: expected, tag: `kiki-${id}` }])
+      assert.equal((await processMessage(webhook(event))).status, 200)
+      assert.equal(sent.length, 1, 'A duplicate webhook must not send another notification')
+    }
+  } finally { webpush.sendNotification = originalSend; globalThis.fetch = fakeFetch }
 })

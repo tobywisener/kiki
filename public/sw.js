@@ -32,7 +32,7 @@ self.addEventListener('fetch', event => {
   }
 })
 self.addEventListener('push', event => {
-  // The server sends no private message text in notification payloads.
+  // Sender names and message previews belong in notifications, never in the app-shell cache.
   let data = {}
   try { data = event.data?.json() || {} } catch { /* A generic notification is still useful. */ }
   event.waitUntil(self.registration.showNotification(data.title || 'Kiki', {

@@ -3,6 +3,7 @@ import { adminClient, corsHeaders, getMember, json } from '../_shared/http.ts'
 import { isAllowedPushEndpoint, isWebhookInsert, uuidPattern } from '../_shared/validation.ts'
 import { parseAzureAlignment } from '../_shared/alignment.ts'
 import { pronunciationText, romanizeThaiWords } from '../_shared/pronunciation.ts'
+import { messageNotification } from '../_shared/notifications.ts'
 
 type Message = { id: string; sender_id: string; original: string; source_language: 'en' | 'th'; translation_attempted_at: string }
 
@@ -54,15 +55,17 @@ async function notify(client: ReturnType<typeof adminClient>, id: string) {
   const subject = Deno.env.get('VAPID_SUBJECT')
   if (!publicKey || !privateKey || !subject) throw new Error('Push is not configured')
   const { data: message, error } = await client.from('messages').update({ notification_claimed_at: new Date().toISOString() })
-    .eq('id', id).is('notification_claimed_at', null).select('sender_id').maybeSingle()
+    .eq('id', id).is('notification_claimed_at', null).select('id,sender_id,original,image_url').maybeSingle()
   if (error) throw error
   if (!message) return
-  const { data: recipients, error: recipientError } = await client.from('members').select('id,language').neq('id', message.sender_id)
-  if (recipientError) throw recipientError
-  for (const recipient of recipients || []) {
+  const { data: members, error: memberError } = await client.from('members').select('id,name,language')
+  if (memberError) throw memberError
+  const sender = members?.find(member => member.id === message.sender_id)
+  for (const recipient of members || []) {
+    if (recipient.id === message.sender_id) continue
     const { data: devices, error: deviceError } = await client.from('push_subscriptions').select('endpoint,p256dh,auth').eq('user_id', recipient.id)
     if (deviceError) throw deviceError
-    const payload = JSON.stringify({ title: 'Kiki ♡', body: recipient.language === 'th' ? 'คนพิเศษส่งข้อความถึงคุณ' : 'Your person sent you a message.', tag: `kiki-${id}` })
+    const payload = JSON.stringify(messageNotification(sender?.name, message, recipient.language))
     await Promise.all((devices || []).map(async device => {
       if (!isAllowedPushEndpoint(device.endpoint)) return
       try {

@@ -86,6 +86,45 @@ test('push notification works even when its payload is malformed', async () => {
   assert.equal(body, 'You have a new message.')
 })
 
+test('service worker displays the sender and message preview supplied by the backend', async () => {
+  const handlers: Record<string, (event: unknown) => void> = {}
+  let displayed: { title: string; options: { body: string; tag: string; data: { url: string } } } | undefined
+  vm.runInNewContext(readFileSync('public/sw.js', 'utf8'), {
+    self: {
+      addEventListener: (type: string, handler: (event: unknown) => void) => { handlers[type] = handler },
+      registration: { showNotification: (title: string, options: NonNullable<typeof displayed>['options']) => { displayed = { title, options }; return Promise.resolve() } },
+    },
+  })
+  let pending: Promise<unknown> | undefined
+  handlers.push({ data: { json: () => ({ title: 'Your person', body: 'คิดถึงนะ 💛', tag: 'kiki-one' }) }, waitUntil: (value: Promise<unknown>) => { pending = value } })
+  await pending
+  assert.equal(displayed?.title, 'Your person')
+  assert.equal(displayed?.options.body, 'คิดถึงนะ 💛')
+  assert.equal(displayed?.options.tag, 'kiki-one')
+  assert.equal(displayed?.options.data.url, '/')
+})
+
+test('notification clicks close the alert and open Kiki using an existing window or a new one', async () => {
+  for (const existing of [true, false]) {
+    const handlers: Record<string, (event: unknown) => void> = {}
+    const calls: string[] = []
+    vm.runInNewContext(readFileSync('public/sw.js', 'utf8'), {
+      self: {
+        location: { origin: 'https://kiki.example' },
+        addEventListener: (type: string, handler: (event: unknown) => void) => { handlers[type] = handler },
+        clients: {
+          matchAll: async () => existing ? [{ url: 'https://kiki.example/', focus: async () => { calls.push('focus') }, navigate: async (url: string) => { calls.push('navigate:' + url) } }] : [],
+          openWindow: async (url: string) => { calls.push('open:' + url) },
+        },
+      }, URL,
+    })
+    let pending: Promise<unknown> | undefined
+    handlers.notificationclick({ notification: { close: () => calls.push('close') }, waitUntil: (value: Promise<unknown>) => { pending = value } })
+    await pending
+    assert.deepEqual(calls, existing ? ['close', 'focus', 'navigate:/'] : ['close', 'open:/'])
+  }
+})
+
 test('app navigation revalidates cached HTML so deployments load the current asset files', async () => {
   const handlers: Record<string, (event: unknown) => void> = {}
   let response: Promise<unknown> | undefined
