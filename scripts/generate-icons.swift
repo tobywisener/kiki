@@ -12,7 +12,7 @@ for (name, size, maskable) in [("icon-192.png", 192, false), ("icon-512.png", 51
   context.scaleBy(x: CGFloat(size) / 512, y: CGFloat(size) / 512)
   context.translateBy(x: 0, y: 512)
   context.scaleBy(x: 1, y: -1)
-  context.setFillColor(color(231, 120, 87))
+  context.setFillColor(color(0, 168, 132))
   context.fill(CGRect(x: 0, y: 0, width: 512, height: 512))
   if maskable { context.translateBy(x: 51.2, y: 51.2); context.scaleBy(x: 0.8, y: 0.8) }
   let heart = CGMutablePath()
@@ -23,8 +23,8 @@ for (name, size, maskable) in [("icon-192.png", 192, false), ("icon-512.png", 51
   heart.addCurve(to: CGPoint(x: 392, y: 284), control1: CGPoint(x: 350, y: 119), control2: CGPoint(x: 457, y: 206))
   heart.addLine(to: CGPoint(x: 256, y: 410))
   heart.closeSubpath()
-  context.setFillColor(color(255, 246, 236)); context.addPath(heart); context.fillPath()
-  context.setStrokeColor(color(255, 246, 236)); context.setLineWidth(18); context.setLineCap(.round)
+  context.setFillColor(color(255, 255, 255)); context.addPath(heart); context.fillPath()
+  context.setStrokeColor(color(255, 255, 255)); context.setLineWidth(18); context.setLineCap(.round)
   context.move(to: CGPoint(x: 192, y: 134)); context.addLine(to: CGPoint(x: 211, y: 164))
   context.move(to: CGPoint(x: 321, y: 134)); context.addLine(to: CGPoint(x: 302, y: 164)); context.strokePath()
   let image = context.makeImage()!

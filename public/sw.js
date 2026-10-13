@@ -1,7 +1,7 @@
 // Cache the app shell only. Private chat and API responses never enter this cache.
-const CACHE = 'kiki-shell-v1'
+const CACHE = 'kiki-shell-v2'
 self.addEventListener('install', event => {
-  event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(['/', '/icon-192.png'])))
+  event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(['/', '/icon-192.png?v=2'])))
   self.skipWaiting()
 })
 self.addEventListener('activate', event => {
@@ -37,8 +37,8 @@ self.addEventListener('push', event => {
   try { data = event.data?.json() || {} } catch { /* A generic notification is still useful. */ }
   event.waitUntil(self.registration.showNotification(data.title || 'Kiki', {
     body: data.body || 'You have a new message.',
-    icon: '/icon-192.png',
-    badge: '/icon-192.png',
+    icon: '/icon-192.png?v=2',
+    badge: '/icon-192.png?v=2',
     tag: data.tag || 'kiki-message',
     data: { url: '/' },
   }))

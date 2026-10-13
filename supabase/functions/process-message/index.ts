@@ -55,7 +55,9 @@ async function notify(client: ReturnType<typeof adminClient>, id: string) {
   const subject = Deno.env.get('VAPID_SUBJECT')
   if (!publicKey || !privateKey || !subject) throw new Error('Push is not configured')
   const { data: message, error } = await client.from('messages').update({ notification_claimed_at: new Date().toISOString() })
-    .eq('id', id).is('notification_claimed_at', null).select('id,sender_id,original,image_url').maybeSingle()
+    // A duplicate webhook must leave the notification for the worker still translating.
+    .eq('id', id).is('notification_claimed_at', null).neq('translation_status', 'processing')
+    .select('id,sender_id,original,source_language,translation,translation_status,image_url').maybeSingle()
   if (error) throw error
   if (!message) return
   const { data: members, error: memberError } = await client.from('members').select('id,name,language')
@@ -101,8 +103,9 @@ Deno.serve(async req => {
     const { data: message, error } = await client.from('messages').select('id').eq('id', id).maybeSingle()
     if (error) throw error
     if (!message) return json({ error: 'Message not found' }, 404)
-    // Sending notifications never waits on translation, or vice versa.
-    const [translation, push] = await Promise.allSettled([translate(client, id), webhook ? notify(client, id) : Promise.resolve()])
+    // Wait for the recipient's translation; failed translations still get a localized alert.
+    const [translation] = await Promise.allSettled([translate(client, id)])
+    const [push] = await Promise.allSettled([webhook ? notify(client, id) : Promise.resolve()])
     if (push.status === 'rejected') console.warn('Notification processing failed')
     if (translation.status === 'rejected') return json({ error: 'Could not process translation' }, 500)
     return json(translation.value, translation.value.translated === false ? 502 : 200)

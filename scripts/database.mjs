@@ -68,7 +68,7 @@ try {
           url := '${endpoint}',
           headers := jsonb_build_object('Content-Type','application/json','x-webhook-secret',webhook_secret),
           body := jsonb_build_object('type','INSERT','schema','public','table','messages','record',jsonb_build_object('id',new.id)),
-          timeout_milliseconds := 30000
+          timeout_milliseconds := 60000
         );
         return new;
       end;

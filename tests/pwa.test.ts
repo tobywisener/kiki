@@ -48,7 +48,7 @@ test('manifest provides correctly sized install icons and a standalone app', () 
   assert.equal(manifest.display, 'standalone')
   assert.equal(manifest.start_url, '/')
   for (const icon of manifest.icons) {
-    const file = readFileSync(`public${icon.src}`)
+    const file = readFileSync(`public${new URL(icon.src, 'https://kiki.example').pathname}`)
     assert.equal(file.subarray(0, 8).toString('hex'), '89504e470d0a1a0a')
     const expected = Number(icon.sizes.split('x')[0])
     assert.equal(file.readUInt32BE(16), expected)

@@ -277,16 +277,20 @@ Deno.test('image provider failures or unsafe links produce a retryable error wit
   } finally { globalThis.fetch = fakeFetch }
 })
 
-Deno.test('webhook notifications use canonical sender names, text previews, and localized photo labels', async () => {
+Deno.test('webhook notifications wait for recipient-language previews, including failures and concurrent duplicates', async () => {
   const originalSend = webpush.sendNotification
   const recipientId = '22222222-2222-4222-8222-222222222222'
   try {
-    for (const [language, original, image, expected] of [
-      ['en', 'คิดถึงนะ 💛', null, 'คิดถึงนะ 💛'],
-      ['th', 'Hello\nthere!', null, 'Hello there!'],
-      ['en', '', imageUrl, '📷 Photo'],
-      ['th', '', imageUrl, '📷 รูปภาพ'],
-      ['en', 'Our dinner 🍜', imageUrl, '📷 Our dinner 🍜'],
+    for (const [language, original, translation, image, expected] of [
+      ['en', 'คิดถึงนะ 💛', 'Miss you 💛', null, 'Miss you 💛'],
+      ['th', 'Hello\nthere!', 'สวัสดี\nนะ!', null, 'สวัสดี นะ!'],
+      ['en', '', null, imageUrl, '📷 Photo'],
+      ['th', '', null, imageUrl, '📷 รูปภาพ'],
+      ['en', 'อาหารเย็นของเรา 🍜', 'Our dinner 🍜', imageUrl, '📷 Our dinner 🍜'],
+      ['th', 'Our dinner 🍜', 'อาหารเย็นของเรา 🍜', imageUrl, '📷 อาหารเย็นของเรา 🍜'],
+      ['en', 'คิดถึงนะ', null, null, 'Sent you a message.'],
+      ['th', 'Miss you', null, null, 'ส่งข้อความถึงคุณ'],
+      ['th', 'Our dinner 🍜', null, imageUrl, '📷 รูปภาพ'],
     ]) {
       configure()
       Deno.env.set('VAPID_PUBLIC_KEY', 'test-only-public-key')
@@ -294,18 +298,47 @@ Deno.test('webhook notifications use canonical sender names, text previews, and 
       Deno.env.set('VAPID_SUBJECT', 'mailto:tests@example.test')
       const sent: { title: string; body: string; tag: string }[] = []
       let claims = 0
+      let translationClaimed = false
+      let translationStatus = original ? 'pending' : 'ready'
+      let savedTranslation: string | null = null
+      let checkedConcurrentDuplicate = false
+      const sourceLanguage = language === 'en' ? 'th' : 'en'
       webpush.sendNotification = ((_subscription: unknown, payload: string) => {
         sent.push(JSON.parse(payload))
         return Promise.resolve({ statusCode: 201, body: '', headers: {} })
       }) as typeof webpush.sendNotification
       globalThis.fetch = async (input, init) => {
         const url = String(input)
-        if (url.includes('/rpc/claim_translation')) return response([])
+        if (url.includes('/rpc/claim_translation')) {
+          if (!original || translationClaimed) return response([])
+          translationClaimed = true
+          translationStatus = 'processing'
+          return response([{ id, sender_id: userId, original, source_language: sourceLanguage, translation_attempted_at: '2026-10-09T10:00:00Z' }])
+        }
+        if (url.includes('/transliterate?')) return response([])
+        if (url.includes('api.cognitive.microsofttranslator.com')) {
+          assert.deepEqual(JSON.parse(String(init?.body)), [{ Text: original }])
+          assert.equal(new URL(url).searchParams.get('to'), language)
+          // A duplicate arriving during translation must not claim or send the alert early.
+          assert.equal((await processMessage(webhook(event))).status, 200)
+          assert.equal(sent.length, 0)
+          assert.equal(claims, 0)
+          checkedConcurrentDuplicate = true
+          return translation ? response([{ translations: [{ text: translation, to: language }] }]) : response({}, 503)
+        }
         if (url.includes('/rest/v1/messages')) {
           if (init?.method === 'PATCH') {
+            const update = JSON.parse(String(init.body))
+            if (update.translation_status) {
+              translationStatus = update.translation_status
+              savedTranslation = update.translation || null
+              return response([])
+            }
+            assert.equal(new URL(url).searchParams.get('translation_status'), 'neq.processing')
+            assert.equal(new URL(url).searchParams.get('select'), 'id,sender_id,original,source_language,translation,translation_status,image_url')
+            if (translationStatus === 'processing') return response(null)
             claims++
-            assert.equal(new URL(url).searchParams.get('select'), 'id,sender_id,original,image_url')
-            return response(claims === 1 ? { id, sender_id: userId, original, image_url: image } : null)
+            return response(claims === 1 ? { id, sender_id: userId, original, source_language: sourceLanguage, translation: savedTranslation, translation_status: translationStatus, image_url: image } : null)
           }
           return response({ id })
         }
@@ -322,7 +355,8 @@ Deno.test('webhook notifications use canonical sender names, text previews, and 
         }
         throw new Error('Unexpected request')
       }
-      assert.equal((await processMessage(webhook({ ...event, record: { id, original: 'Forged preview', sender_id: recipientId } }))).status, 200)
+      assert.equal((await processMessage(webhook({ ...event, record: { id, original: 'Forged preview', sender_id: recipientId } }))).status, original && !translation ? 502 : 200)
+      assert.equal(checkedConcurrentDuplicate, !!original)
       assert.deepEqual(sent, [{ title: 'Actual sender', body: expected, tag: `kiki-${id}` }])
       assert.equal((await processMessage(webhook(event))).status, 200)
       assert.equal(sent.length, 1, 'A duplicate webhook must not send another notification')
